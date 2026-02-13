@@ -28,6 +28,7 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
     implementation 'org.postgresql:postgresql'
 
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.21.4')
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:junit-jupiter'
@@ -36,4 +37,7 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    if (System.getProperty("os.name").toLowerCase().contains("windows") && System.getenv("DOCKER_HOST") == null) {
+        environment "DOCKER_HOST", "npipe:////./pipe/dockerDesktopLinuxEngine"
+    }
 }
