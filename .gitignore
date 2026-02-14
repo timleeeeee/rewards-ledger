@@ -36,5 +36,11 @@ out/
 ### VS Code ###
 .vscode/
 
+### Frontend ###
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
 ### Env ###
 .env
+frontend/*.tsbuildinfo
