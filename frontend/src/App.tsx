@@ -380,6 +380,7 @@ function App() {
           Interview-ready frontend to exercise account, ledger, reliability, and tracing behaviors against the
           Spring Boot backend.
         </p>
+        <p className="muted">Demo environment only. Do not enter real personal data (PII).</p>
       </header>
 
       <div className="tabs">
