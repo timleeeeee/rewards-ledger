@@ -34,7 +34,7 @@ services:
       SERVER_PORT: ${SERVER_PORT}
       APP_VERSION: ${APP_VERSION}
     ports:
-      - "127.0.0.1:${SERVER_PORT}:${SERVER_PORT}"
+      - "${SERVER_PORT}:${SERVER_PORT}"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${SERVER_PORT}/health >/dev/null || exit 1"]
       interval: 15s
@@ -48,15 +48,13 @@ services:
       dockerfile: frontend/Dockerfile
       args:
         VITE_API_BASE_URL: ${FRONTEND_API_BASE_URL}
+        VITE_API_KEY: ${FRONTEND_API_KEY}
     image: rewards-frontend:local
     container_name: rewards-frontend
     restart: unless-stopped
     depends_on:
       app:
         condition: service_healthy
-    environment:
-      BACKEND_UPSTREAM_PORT: ${SERVER_PORT}
-      UPSTREAM_API_KEY: ${API_KEY}
     ports:
       - "${FRONTEND_PORT}:80"
     healthcheck:

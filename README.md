@@ -4,7 +4,7 @@ Production-style full-stack portfolio project for a rewards and points ledger.
 
 ## Architecture
 - `backend`: Java 21 + Spring Boot 3.5 API (append-only ledger, idempotency, concurrency safety)
-- `frontend`: React + TypeScript (Wallet + Ops/Debug demo console, Nginx reverse proxy for `/api`)
+- `frontend`: React + TypeScript (Wallet + Ops/Debug demo console)
 - `postgres`: PostgreSQL 16 with Flyway-managed migrations
 
 ## Tech
@@ -75,7 +75,6 @@ npm ci
 npm run dev
 ```
 Vite dev server runs on `http://localhost:5173` and proxies `/api` to backend `http://localhost:8080`.
-Write calls use server-side proxy injection for `X-API-Key` (from `UPSTREAM_API_KEY`, default `dev-api-key`).
 
 ## Tests
 Backend:
@@ -94,10 +93,6 @@ npm run build
 Workflow: `.github/workflows/ci.yml`
 - Backend job: Gradle test + bootJar
 - Frontend job: npm ci + test + build
-
-## Security Automation
-- CodeQL: `.github/workflows/codeql.yml`
-- Dependabot updates: `.github/dependabot.yml`
 
 ## Optional VM Deploy (SSH)
 Files:
@@ -123,6 +118,7 @@ Deploy workflow:
 - `SERVER_PORT`
 - `FRONTEND_PORT`
 - `FRONTEND_API_BASE_URL`
+- `FRONTEND_API_KEY`
 
 ## Environment Variables (`.env.example`)
 - `SPRING_DATASOURCE_URL`
@@ -133,24 +129,7 @@ Deploy workflow:
 - `APP_VERSION`
 - `FRONTEND_PORT`
 - `FRONTEND_API_BASE_URL`
-
-For public deployment, start from `.env.public.example` and replace placeholder secrets.
-
-## Security Baseline (Public Demo)
-- frontend does not embed `X-API-Key` in browser code; Nginx injects it server-side for write routes
-- write routes are rate-limited at Nginx (`/api/transfer`, `/api/accounts/{id}/earn|spend|reversal`)
-- backend port is bound to localhost in compose (`127.0.0.1:${SERVER_PORT}`), so only frontend is public
-- PostgreSQL is internal-only (no published host port)
-- max write amount guardrail is enforced on earn/spend/transfer requests (`<= 1,000,000`)
-- keep `.env` and secrets out of git; rotate keys if exposed
-- demo environment only; do not enter real personal data (PII)
-
-## Public Deployment Checklist
-- configure HTTPS/TLS at the edge (domain + certificate)
-- expose only frontend port (`80`/`443`) in VM firewall/security group
-- keep backend (`8080`) and database (`5432`) blocked from public ingress
-- use demo-only secrets in GitHub Actions and rotate keys regularly
-- detailed runbook: `docs/public-deploy-hardening.md`
+- `FRONTEND_API_KEY`
 
 ## Observability
 - `X-Request-Id` is accepted/returned by backend

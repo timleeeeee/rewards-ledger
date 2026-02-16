@@ -52,6 +52,7 @@ jobs:
           APP_VERSION=${{ github.sha }}
           FRONTEND_PORT=${{ secrets.FRONTEND_PORT }}
           FRONTEND_API_BASE_URL=${{ secrets.FRONTEND_API_BASE_URL }}
+          FRONTEND_API_KEY=${{ secrets.FRONTEND_API_KEY }}
           EOT
           EOF
 

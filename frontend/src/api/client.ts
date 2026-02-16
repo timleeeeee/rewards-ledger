@@ -12,6 +12,7 @@ import type {
 } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
+const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) ?? "dev-api-key";
 
 export class ApiHttpError extends Error {
   status: number;
@@ -42,6 +43,7 @@ interface RequestOptions {
   method: "GET" | "POST";
   path: string;
   body?: unknown;
+  includeApiKey?: boolean;
   idempotencyKey?: string;
   requestId?: string;
 }
@@ -71,6 +73,10 @@ async function apiRequest<T>(options: RequestOptions): Promise<ApiCall<T>> {
 
   if (options.body !== undefined) {
     headers.set("Content-Type", "application/json");
+  }
+
+  if (options.includeApiKey) {
+    headers.set("X-API-Key", API_KEY);
   }
 
   if (options.idempotencyKey) {
@@ -137,6 +143,7 @@ export const ledgerApi = {
       method: "POST",
       path: `/accounts/${accountId}/earn`,
       body,
+      includeApiKey: true,
       idempotencyKey,
       requestId
     });
@@ -146,6 +153,7 @@ export const ledgerApi = {
       method: "POST",
       path: `/accounts/${accountId}/spend`,
       body,
+      includeApiKey: true,
       idempotencyKey,
       requestId
     });
@@ -155,6 +163,7 @@ export const ledgerApi = {
       method: "POST",
       path: "/transfer",
       body,
+      includeApiKey: true,
       idempotencyKey,
       requestId
     });
@@ -164,6 +173,7 @@ export const ledgerApi = {
       method: "POST",
       path: `/accounts/${accountId}/reversal`,
       body,
+      includeApiKey: true,
       idempotencyKey,
       requestId
     });
