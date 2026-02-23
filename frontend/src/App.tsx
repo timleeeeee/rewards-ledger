@@ -153,7 +153,7 @@ function App() {
     setLastPayload(summary);
     setNotice({ tone: "success", message: `${label} succeeded (${apiCall.status})` });
     appendActivity({
-      id: crypto.randomUUID(),
+      id: nextRequestId(),
       at: new Date().toISOString(),
       label,
       method: apiCall.method,
@@ -181,7 +181,7 @@ function App() {
     }
 
     appendActivity({
-      id: crypto.randomUUID(),
+      id: nextRequestId(),
       at: new Date().toISOString(),
       label,
       method: parsed.method,
