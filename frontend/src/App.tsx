@@ -1,8 +1,10 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ApiHttpError, ledgerApi } from "./api/client";
+import { clearSession, getSessionState, setSessionFromAuth } from "./api/session";
 import type {
   AccountResponse,
   ApiCall,
+  AuthUser,
   HealthResponse,
   TransactionPageResponse,
   TransactionResponse
@@ -11,6 +13,7 @@ import { Panel } from "./components/Panel";
 import { formatIso, nextIdempotencyKey, nextRequestId, shortId } from "./lib/format";
 
 type Tab = "wallet" | "ops";
+type AuthMode = "login" | "register";
 
 type Notice = {
   tone: "success" | "error";
@@ -70,6 +73,11 @@ function parseError(error: unknown): {
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>("wallet");
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getSessionState()?.user ?? null);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+
   const [accounts, setAccounts] = useState<string[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("");
   const [account, setAccount] = useState<AccountResponse | null>(null);
@@ -98,6 +106,44 @@ function App() {
     [accounts, selectedAccountId]
   );
 
+  function resetWalletState(): void {
+    setAccounts([]);
+    setSelectedAccountId("");
+    setAccount(null);
+    setTransactions([]);
+    setNextCursor(null);
+    setTransferTargetId("");
+    setReversalTransactionId("");
+    setIdempotencyDemoResult("");
+    setInsufficientFundsDemoResult("");
+  }
+
+  useEffect(() => {
+    let alive = true;
+    const bootstrap = async () => {
+      const session = getSessionState();
+      if (!session) {
+        return;
+      }
+      try {
+        const me = await ledgerApi.me(nextRequestId());
+        if (alive) {
+          setCurrentUser(me.data);
+        }
+      } catch {
+        clearSession();
+        if (alive) {
+          setCurrentUser(null);
+          resetWalletState();
+        }
+      }
+    };
+    void bootstrap();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   function appendActivity(entry: ActivityEntry): void {
     setActivity((prev) => [entry, ...prev].slice(0, 25));
   }
@@ -121,10 +167,19 @@ function App() {
   function markFailure(label: string, error: unknown): void {
     const parsed = parseError(error);
     setLastPayload(parsed.summary);
-    setNotice({
-      tone: "error",
-      message: `${label} failed (${parsed.status}) ${parsed.code}: ${parsed.message}`
-    });
+
+    if (parsed.status === 401) {
+      clearSession();
+      setCurrentUser(null);
+      resetWalletState();
+      setNotice({ tone: "error", message: "Session expired or unauthorized. Please sign in again." });
+    } else {
+      setNotice({
+        tone: "error",
+        message: `${label} failed (${parsed.status}) ${parsed.code}: ${parsed.message}`
+      });
+    }
+
     appendActivity({
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -150,7 +205,7 @@ function App() {
   }
 
   async function refreshAccount(accountId = selectedAccountId): Promise<void> {
-    if (!accountId) {
+    if (!accountId || !currentUser) {
       return;
     }
 
@@ -167,7 +222,45 @@ function App() {
     });
   }
 
+  async function submitAuth(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    await withBusy("auth", async () => {
+      const response = authMode === "register"
+        ? await ledgerApi.register(authEmail.trim(), authPassword, nextRequestId())
+        : await ledgerApi.login(authEmail.trim(), authPassword, nextRequestId());
+
+      setSessionFromAuth(response.data);
+      setCurrentUser(response.data.user);
+      setAuthPassword("");
+      markSuccess(authMode === "register" ? "Register" : "Login", response, {
+        user: response.data.user,
+        accessTokenExpiresInSeconds: response.data.accessTokenExpiresInSeconds
+      });
+    });
+  }
+
+  async function logout(): Promise<void> {
+    await withBusy("logout", async () => {
+      const session = getSessionState();
+      if (session?.refreshToken) {
+        try {
+          await ledgerApi.logout(session.refreshToken, nextRequestId());
+        } catch {
+          // Logout should still clear local auth state even if backend token is already invalid.
+        }
+      }
+      clearSession();
+      setCurrentUser(null);
+      resetWalletState();
+      setNotice({ tone: "success", message: "Signed out." });
+    });
+  }
+
   async function createAccount(): Promise<void> {
+    if (!currentUser) {
+      setNotice({ tone: "error", message: "Sign in before creating accounts." });
+      return;
+    }
     await withBusy("create-account", async () => {
       const created = await ledgerApi.createAccount(nextRequestId());
       setAccounts((prev) => (prev.includes(created.data.id) ? prev : [created.data.id, ...prev]));
@@ -377,248 +470,325 @@ function App() {
         <p className="eyebrow">Rewards Ledger Console</p>
         <h1>Wallet + Ops Demo</h1>
         <p>
-          Interview-ready frontend to exercise account, ledger, reliability, and tracing behaviors against the
+          Frontend demo to exercise account, ledger, reliability, and tracing behaviors against the
           Spring Boot backend.
         </p>
         <p className="muted">Demo environment only. Do not enter real personal data (PII).</p>
+        {currentUser ? (
+          <p className="muted">Signed in as <span className="mono">{currentUser.email}</span></p>
+        ) : (
+          <p className="muted">Sign in to run wallet and write operations.</p>
+        )}
       </header>
-
-      <div className="tabs">
-        <button
-          className={activeTab === "wallet" ? "tab active" : "tab"}
-          type="button"
-          onClick={() => setActiveTab("wallet")}
-        >
-          Wallet
-        </button>
-        <button
-          className={activeTab === "ops" ? "tab active" : "tab"}
-          type="button"
-          onClick={() => setActiveTab("ops")}
-        >
-          Ops / Debug
-        </button>
-      </div>
 
       {notice ? <div className={`notice ${notice.tone}`}>{notice.message}</div> : null}
 
-      <main className="grid">
-        <div className="left-column">
-          <Panel title="Account Dashboard" subtitle="Create and switch wallet accounts">
-            <div className="button-row">
-              <button type="button" onClick={createAccount} disabled={busyKey !== null}>
-                {busyKey === "create-account" ? "Creating..." : "Create Account"}
-              </button>
-              <button type="button" onClick={() => refreshAccount()} disabled={!selectedAccountId || busyKey !== null}>
-                Refresh
-              </button>
-            </div>
-
-            <label className="field">
-              <span>Selected Account</span>
-              <select
-                value={selectedAccountId}
-                onChange={(event) => void onSelectAccount(event.target.value)}
-                disabled={accounts.length === 0 || busyKey !== null}
-              >
-                <option value="">Select an account</option>
-                {accounts.map((id) => (
-                  <option key={id} value={id}>
-                    {shortId(id)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {account ? (
-              <dl className="data-list">
-                <div>
-                  <dt>Status</dt>
-                  <dd>{account.status}</dd>
-                </div>
-                <div>
-                  <dt>Balance</dt>
-                  <dd>{account.balance} PTS</dd>
-                </div>
-                <div>
-                  <dt>Created</dt>
-                  <dd>{formatIso(account.createdAt)}</dd>
-                </div>
-                <div>
-                  <dt>Account ID</dt>
-                  <dd className="mono">{account.id}</dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="muted">Create or select an account to load wallet data.</p>
-            )}
-          </Panel>
-
-          <Panel title="Actions" subtitle="Earn, spend, or transfer points">
-            <form className="action-form" onSubmit={(event) => void earnPoints(event)}>
-              <h3>Earn</h3>
-              <label>
-                Amount
-                <input type="number" min="1" value={earnAmount} onChange={(e) => setEarnAmount(e.target.value)} />
-              </label>
-              <button type="submit" disabled={busyKey !== null}>Earn Points</button>
-            </form>
-
-            <form className="action-form" onSubmit={(event) => void spendPoints(event)}>
-              <h3>Spend</h3>
-              <label>
-                Amount
-                <input type="number" min="1" value={spendAmount} onChange={(e) => setSpendAmount(e.target.value)} />
-              </label>
-              <button type="submit" disabled={busyKey !== null}>Spend Points</button>
-            </form>
-
-            <form className="action-form" onSubmit={(event) => void transferPoints(event)}>
-              <h3>Transfer</h3>
-              <label>
-                Target Account
-                <select
-                  value={transferTargetId}
-                  onChange={(e) => setTransferTargetId(e.target.value)}
-                  disabled={availableTargets.length === 0}
-                >
-                  <option value="">Select target</option>
-                  {availableTargets.map((id) => (
-                    <option key={id} value={id}>
-                      {shortId(id)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Amount
-                <input
-                  type="number"
-                  min="1"
-                  value={transferAmount}
-                  onChange={(e) => setTransferAmount(e.target.value)}
-                />
-              </label>
-              <button type="submit" disabled={busyKey !== null}>Transfer Points</button>
-            </form>
-
-            <div className="inline-fields">
-              <label>
-                Reason
-                <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="optional" />
-              </label>
-              <label>
-                Currency
-                <input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="PTS" />
-              </label>
-            </div>
-          </Panel>
-
-          {activeTab === "ops" ? (
-            <Panel title="Ops / Debug" subtitle="Operational controls and reliability checks">
-              <form className="action-form" onSubmit={(event) => void reverseTransaction(event)}>
-                <h3>Reverse Transaction</h3>
+      {!currentUser ? (
+        <main className="grid">
+          <div className="left-column">
+            <Panel title="Authentication" subtitle="Sign in to access wallet operations">
+              <form className="action-form" onSubmit={(event) => void submitAuth(event)}>
+                <h3>{authMode === "login" ? "Login" : "Register"}</h3>
                 <label>
-                  Original Transaction ID
+                  Email
                   <input
-                    value={reversalTransactionId}
-                    onChange={(e) => setReversalTransactionId(e.target.value)}
-                    placeholder="UUID"
+                    type="email"
+                    required
+                    value={authEmail}
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                    placeholder="demo@example.com"
                   />
                 </label>
-                <button type="submit" disabled={busyKey !== null}>Create Reversal</button>
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    required
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder="at least 8 characters"
+                  />
+                </label>
+                <div className="button-row">
+                  <button type="submit" disabled={busyKey !== null}>
+                    {busyKey === "auth" ? "Submitting..." : authMode === "login" ? "Login" : "Register"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode((prev) => (prev === "login" ? "register" : "login"))}
+                    disabled={busyKey !== null}
+                  >
+                    {authMode === "login" ? "Need an account?" : "Have an account?"}
+                  </button>
+                </div>
               </form>
+            </Panel>
+          </div>
 
+          <div className="right-column">
+            <Panel title="Health / Status" subtitle="Public backend health endpoint">
               <div className="button-row">
-                <button type="button" onClick={() => void runIdempotencyDemo()} disabled={busyKey !== null}>
-                  Run Idempotency Replay Demo
-                </button>
-                <button type="button" onClick={() => void runInsufficientFundsDemo()} disabled={busyKey !== null}>
-                  Trigger Insufficient Funds
-                </button>
                 <button type="button" onClick={() => void refreshHealth()} disabled={busyKey !== null}>
                   Refresh Health
                 </button>
               </div>
-
-              {idempotencyDemoResult ? <p className="hint">{idempotencyDemoResult}</p> : null}
-              {insufficientFundsDemoResult ? <p className="hint">{insufficientFundsDemoResult}</p> : null}
-
-              {health ? (
-                <pre className="payload">{toPretty(health)}</pre>
-              ) : (
-                <p className="muted">Health data not loaded yet.</p>
-              )}
+              {health ? <pre className="payload">{toPretty(health)}</pre> : <p className="muted">No health data loaded.</p>}
             </Panel>
-          ) : null}
-        </div>
 
-        <div className="right-column">
-          <Panel title="Recent Transactions" subtitle="Cursor-based history for selected account">
-            {transactions.length === 0 ? (
-              <p className="muted">No transactions loaded.</p>
-            ) : (
-              <table className="tx-table">
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Type</th>
-                    <th>Direction</th>
-                    <th>Amount</th>
-                    <th>IDs</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map((tx) => (
-                    <tr key={tx.id}>
-                      <td>{formatIso(tx.createdAt)}</td>
-                      <td>{tx.type}</td>
-                      <td>{tx.direction}</td>
-                      <td>{tx.amount} {tx.currency}</td>
-                      <td>
-                        <div className="mono">tx: {shortId(tx.id)}</div>
-                        <div className="mono">related: {shortId(tx.relatedAccountId ?? undefined)}</div>
-                        <div className="mono">ref: {shortId(tx.referenceTransactionId ?? undefined)}</div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <Panel title="Last API Result" subtitle="Detailed payload for latest operation">
+              <pre className="payload">{lastPayload || "No operations yet."}</pre>
+            </Panel>
+          </div>
+        </main>
+      ) : (
+        <>
+          <div className="tabs">
+            <button
+              className={activeTab === "wallet" ? "tab active" : "tab"}
+              type="button"
+              onClick={() => setActiveTab("wallet")}
+            >
+              Wallet
+            </button>
+            <button
+              className={activeTab === "ops" ? "tab active" : "tab"}
+              type="button"
+              onClick={() => setActiveTab("ops")}
+            >
+              Ops / Debug
+            </button>
+            <button type="button" className="tab" onClick={() => void logout()} disabled={busyKey !== null}>
+              Logout
+            </button>
+          </div>
 
-            <div className="button-row">
-              <button type="button" onClick={() => void loadMoreTransactions()} disabled={!nextCursor || busyKey !== null}>
-                Load More
-              </button>
-            </div>
-          </Panel>
+          <main className="grid">
+            <div className="left-column">
+              <Panel title="Account Dashboard" subtitle="Create and switch wallet accounts">
+                <div className="button-row">
+                  <button type="button" onClick={() => void createAccount()} disabled={busyKey !== null}>
+                    {busyKey === "create-account" ? "Creating..." : "Create Account"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void refreshAccount()}
+                    disabled={!selectedAccountId || busyKey !== null}
+                  >
+                    Refresh
+                  </button>
+                </div>
 
-          <Panel title="Request / Response Trace" subtitle="Returned request IDs and payload summaries">
-            {activity.length === 0 ? (
-              <p className="muted">No API calls recorded yet.</p>
-            ) : (
-              <ul className="activity-list">
-                {activity.map((item) => (
-                  <li key={item.id}>
-                    <div className="activity-meta">
-                      <span>{formatIso(item.at)}</span>
-                      <span>{item.label}</span>
-                      <span>{item.method} {item.path}</span>
-                      <span>Status {item.status}</span>
-                      <span className="mono">ReqID: {item.requestId ?? "-"}</span>
+                <label className="field">
+                  <span>Selected Account</span>
+                  <select
+                    value={selectedAccountId}
+                    onChange={(event) => void onSelectAccount(event.target.value)}
+                    disabled={accounts.length === 0 || busyKey !== null}
+                  >
+                    <option value="">Select an account</option>
+                    {accounts.map((id) => (
+                      <option key={id} value={id}>
+                        {shortId(id)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {account ? (
+                  <dl className="data-list">
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{account.status}</dd>
                     </div>
-                    <pre className="payload small">{item.summary}</pre>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
+                    <div>
+                      <dt>Balance</dt>
+                      <dd>{account.balance} PTS</dd>
+                    </div>
+                    <div>
+                      <dt>Created</dt>
+                      <dd>{formatIso(account.createdAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Account ID</dt>
+                      <dd className="mono">{account.id}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <p className="muted">Create or select an account to load wallet data.</p>
+                )}
+              </Panel>
 
-          <Panel title="Last API Result" subtitle="Detailed payload for latest operation">
-            <pre className="payload">{lastPayload || "No operations yet."}</pre>
-          </Panel>
-        </div>
-      </main>
+              <Panel title="Actions" subtitle="Earn, spend, or transfer points">
+                <form className="action-form" onSubmit={(event) => void earnPoints(event)}>
+                  <h3>Earn</h3>
+                  <label>
+                    Amount
+                    <input type="number" min="1" value={earnAmount} onChange={(e) => setEarnAmount(e.target.value)} />
+                  </label>
+                  <button type="submit" disabled={busyKey !== null}>Earn Points</button>
+                </form>
+
+                <form className="action-form" onSubmit={(event) => void spendPoints(event)}>
+                  <h3>Spend</h3>
+                  <label>
+                    Amount
+                    <input type="number" min="1" value={spendAmount} onChange={(e) => setSpendAmount(e.target.value)} />
+                  </label>
+                  <button type="submit" disabled={busyKey !== null}>Spend Points</button>
+                </form>
+
+                <form className="action-form" onSubmit={(event) => void transferPoints(event)}>
+                  <h3>Transfer</h3>
+                  <label>
+                    Target Account
+                    <select
+                      value={transferTargetId}
+                      onChange={(e) => setTransferTargetId(e.target.value)}
+                      disabled={availableTargets.length === 0}
+                    >
+                      <option value="">Select target</option>
+                      {availableTargets.map((id) => (
+                        <option key={id} value={id}>
+                          {shortId(id)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Amount
+                    <input
+                      type="number"
+                      min="1"
+                      value={transferAmount}
+                      onChange={(e) => setTransferAmount(e.target.value)}
+                    />
+                  </label>
+                  <button type="submit" disabled={busyKey !== null}>Transfer Points</button>
+                </form>
+
+                <div className="inline-fields">
+                  <label>
+                    Reason
+                    <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="optional" />
+                  </label>
+                  <label>
+                    Currency
+                    <input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="PTS" />
+                  </label>
+                </div>
+              </Panel>
+
+              {activeTab === "ops" ? (
+                <Panel title="Ops / Debug" subtitle="Operational controls and reliability checks">
+                  <form className="action-form" onSubmit={(event) => void reverseTransaction(event)}>
+                    <h3>Reverse Transaction</h3>
+                    <label>
+                      Original Transaction ID
+                      <input
+                        value={reversalTransactionId}
+                        onChange={(e) => setReversalTransactionId(e.target.value)}
+                        placeholder="UUID"
+                      />
+                    </label>
+                    <button type="submit" disabled={busyKey !== null}>Create Reversal</button>
+                  </form>
+
+                  <div className="button-row">
+                    <button type="button" onClick={() => void runIdempotencyDemo()} disabled={busyKey !== null}>
+                      Run Idempotency Replay Demo
+                    </button>
+                    <button type="button" onClick={() => void runInsufficientFundsDemo()} disabled={busyKey !== null}>
+                      Trigger Insufficient Funds
+                    </button>
+                    <button type="button" onClick={() => void refreshHealth()} disabled={busyKey !== null}>
+                      Refresh Health
+                    </button>
+                  </div>
+
+                  {idempotencyDemoResult ? <p className="hint">{idempotencyDemoResult}</p> : null}
+                  {insufficientFundsDemoResult ? <p className="hint">{insufficientFundsDemoResult}</p> : null}
+
+                  {health ? (
+                    <pre className="payload">{toPretty(health)}</pre>
+                  ) : (
+                    <p className="muted">Health data not loaded yet.</p>
+                  )}
+                </Panel>
+              ) : null}
+            </div>
+
+            <div className="right-column">
+              <Panel title="Recent Transactions" subtitle="Cursor-based history for selected account">
+                {transactions.length === 0 ? (
+                  <p className="muted">No transactions loaded.</p>
+                ) : (
+                  <table className="tx-table">
+                    <thead>
+                      <tr>
+                        <th>When</th>
+                        <th>Type</th>
+                        <th>Direction</th>
+                        <th>Amount</th>
+                        <th>IDs</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions.map((tx) => (
+                        <tr key={tx.id}>
+                          <td>{formatIso(tx.createdAt)}</td>
+                          <td>{tx.type}</td>
+                          <td>{tx.direction}</td>
+                          <td>{tx.amount} {tx.currency}</td>
+                          <td>
+                            <div className="mono">tx: {shortId(tx.id)}</div>
+                            <div className="mono">related: {shortId(tx.relatedAccountId ?? undefined)}</div>
+                            <div className="mono">ref: {shortId(tx.referenceTransactionId ?? undefined)}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <div className="button-row">
+                  <button
+                    type="button"
+                    onClick={() => void loadMoreTransactions()}
+                    disabled={!nextCursor || busyKey !== null}
+                  >
+                    Load More
+                  </button>
+                </div>
+              </Panel>
+
+              <Panel title="Request / Response Trace" subtitle="Returned request IDs and payload summaries">
+                {activity.length === 0 ? (
+                  <p className="muted">No API calls recorded yet.</p>
+                ) : (
+                  <ul className="activity-list">
+                    {activity.map((item) => (
+                      <li key={item.id}>
+                        <div className="activity-meta">
+                          <span>{formatIso(item.at)}</span>
+                          <span>{item.label}</span>
+                          <span>{item.method} {item.path}</span>
+                          <span>Status {item.status}</span>
+                          <span className="mono">ReqID: {item.requestId ?? "-"}</span>
+                        </div>
+                        <pre className="payload small">{item.summary}</pre>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+
+              <Panel title="Last API Result" subtitle="Detailed payload for latest operation">
+                <pre className="payload">{lastPayload || "No operations yet."}</pre>
+              </Panel>
+            </div>
+          </main>
+        </>
+      )}
     </div>
   );
 }

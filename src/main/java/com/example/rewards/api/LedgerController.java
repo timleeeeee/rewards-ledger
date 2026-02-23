@@ -1,6 +1,8 @@
 package com.example.rewards.api;
 
+import com.example.rewards.auth.AuthRequestAttributes;
 import com.example.rewards.ledger.LedgerService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,26 +27,29 @@ public class LedgerController {
     public TransactionResponse earn(
             @PathVariable("id") UUID accountId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
-            @Valid @RequestBody AmountRequest request
+            @Valid @RequestBody AmountRequest request,
+            HttpServletRequest httpRequest
     ) {
-        return ledgerService.earn(accountId, request, idempotencyKey);
+        return ledgerService.earn(AuthRequestAttributes.requireUserId(httpRequest), accountId, request, idempotencyKey);
     }
 
     @PostMapping("/{id}/spend")
     public TransactionResponse spend(
             @PathVariable("id") UUID accountId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
-            @Valid @RequestBody AmountRequest request
+            @Valid @RequestBody AmountRequest request,
+            HttpServletRequest httpRequest
     ) {
-        return ledgerService.spend(accountId, request, idempotencyKey);
+        return ledgerService.spend(AuthRequestAttributes.requireUserId(httpRequest), accountId, request, idempotencyKey);
     }
 
     @PostMapping("/{id}/reversal")
     public TransactionResponse reversal(
             @PathVariable("id") UUID accountId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
-            @Valid @RequestBody ReversalRequest request
+            @Valid @RequestBody ReversalRequest request,
+            HttpServletRequest httpRequest
     ) {
-        return ledgerService.reversal(accountId, request, idempotencyKey);
+        return ledgerService.reversal(AuthRequestAttributes.requireUserId(httpRequest), accountId, request, idempotencyKey);
     }
 }

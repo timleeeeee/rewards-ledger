@@ -1,6 +1,8 @@
 package com.example.rewards.api;
 
+import com.example.rewards.auth.AuthRequestAttributes;
 import com.example.rewards.ledger.LedgerService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,8 +23,9 @@ public class TransferController {
     @PostMapping("/transfer")
     public List<TransactionResponse> transfer(
             @RequestHeader("Idempotency-Key") String idempotencyKey,
-            @Valid @RequestBody TransferRequest request
+            @Valid @RequestBody TransferRequest request,
+            HttpServletRequest httpRequest
     ) {
-        return ledgerService.transfer(request, idempotencyKey);
+        return ledgerService.transfer(AuthRequestAttributes.requireUserId(httpRequest), request, idempotencyKey);
     }
 }

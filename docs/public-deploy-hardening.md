@@ -1,4 +1,4 @@
-# Public Deployment Hardening Runbook
+# Public Deployment Checklist (Demo)
 
 Use this checklist before sharing a public demo URL.
 
@@ -15,12 +15,16 @@ PowerShell examples:
   .Replace('+','-') `
   .Replace('/','_')
 
+# 48-byte JWT secret (base64)
+[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))
+
 # 32-byte DB password
 [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }))
 ```
 
 Update these GitHub Secrets:
 - `API_KEY`
+- `AUTH_JWT_SECRET`
 - `SPRING_DATASOURCE_PASSWORD`
 
 ## 2) Enforce Public Exposure Rules
@@ -53,3 +57,4 @@ Enable in repository settings:
 - use demo-only credentials and data
 - do not store real customer information
 - reset/refresh demo data periodically
+- keep rate limits enabled for auth and write routes

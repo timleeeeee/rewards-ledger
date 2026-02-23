@@ -1,19 +1,30 @@
-# Rewards Ledger Platform
+# Rewards Ledger Demo
 
-Production-style full-stack portfolio project for a rewards and points ledger.
+Full-stack portfolio demo for a rewards and points ledger.
+
+This repo focuses on correctness and operational basics for interviews and technical review. It is intentionally scoped as a demo system, not a full enterprise rollout.
 
 ## Architecture
-- `backend`: Java 21 + Spring Boot 3.5 API (append-only ledger, idempotency, concurrency safety)
+- `backend`: Java 21 + Spring Boot 3.5 API (append-only ledger, idempotency, concurrency safety, auth + ownership)
 - `frontend`: React + TypeScript (Wallet + Ops/Debug demo console, Nginx reverse proxy for `/api`)
 - `postgres`: PostgreSQL 16 with Flyway-managed migrations
 
 ## Tech
 - Java 21, Spring Boot, JPA, Flyway, PostgreSQL
+- JWT access tokens + refresh rotation, BCrypt password hashing
 - React, TypeScript, Vite, Vitest
 - Docker, Docker Compose
 - GitHub Actions (CI + optional VM deploy)
 
 ## Backend API (summary)
+Auth:
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `GET /auth/me`
+
+Ledger:
 - `POST /accounts`
 - `GET /accounts/{id}`
 - `POST /accounts/{id}/earn`
@@ -23,14 +34,16 @@ Production-style full-stack portfolio project for a rewards and points ledger.
 - `GET /accounts/{id}/transactions?limit=...&cursor=...`
 - `GET /health`
 
-Write endpoints require:
-- `X-API-Key`
-- `Idempotency-Key`
+Headers:
+- protected routes require `Authorization: Bearer <accessToken>`
+- write routes require `Idempotency-Key`
+- backend write routes also require `X-API-Key` (frontend proxy injects server-side)
 
 ## Frontend Demo Scope
 Two tabs are included:
 
 1. Wallet
+- register/login and logout flow
 - create/select account
 - view balance and paginated transaction history
 - earn, spend, transfer actions
@@ -75,7 +88,6 @@ npm ci
 npm run dev
 ```
 Vite dev server runs on `http://localhost:5173` and proxies `/api` to backend `http://localhost:8080`.
-Write calls use server-side proxy injection for `X-API-Key` (from `UPSTREAM_API_KEY`, default `dev-api-key`).
 
 ## Tests
 Backend:
@@ -120,6 +132,13 @@ Deploy workflow:
 - `SPRING_DATASOURCE_USERNAME`
 - `SPRING_DATASOURCE_PASSWORD`
 - `API_KEY`
+- `AUTH_JWT_SECRET`
+- `AUTH_JWT_ACCESS_MINUTES`
+- `AUTH_JWT_REFRESH_DAYS`
+- `RATE_LIMIT_LOGIN_PER_MINUTE`
+- `RATE_LIMIT_REGISTER_PER_MINUTE`
+- `RATE_LIMIT_REFRESH_PER_MINUTE`
+- `RATE_LIMIT_WRITE_PER_MINUTE`
 - `SERVER_PORT`
 - `FRONTEND_PORT`
 - `FRONTEND_API_BASE_URL`
@@ -129,6 +148,13 @@ Deploy workflow:
 - `SPRING_DATASOURCE_USERNAME`
 - `SPRING_DATASOURCE_PASSWORD`
 - `API_KEY`
+- `AUTH_JWT_SECRET`
+- `AUTH_JWT_ACCESS_MINUTES`
+- `AUTH_JWT_REFRESH_DAYS`
+- `RATE_LIMIT_LOGIN_PER_MINUTE`
+- `RATE_LIMIT_REGISTER_PER_MINUTE`
+- `RATE_LIMIT_REFRESH_PER_MINUTE`
+- `RATE_LIMIT_WRITE_PER_MINUTE`
 - `SERVER_PORT`
 - `APP_VERSION`
 - `FRONTEND_PORT`
@@ -136,12 +162,16 @@ Deploy workflow:
 
 For public deployment, start from `.env.public.example` and replace placeholder secrets.
 
-## Security Baseline (Public Demo)
-- frontend does not embed `X-API-Key` in browser code; Nginx injects it server-side for write routes
-- write routes are rate-limited at Nginx (`/api/transfer`, `/api/accounts/{id}/earn|spend|reversal`)
-- backend port is bound to localhost in compose (`127.0.0.1:${SERVER_PORT}`), so only frontend is public
+## Security Notes (Demo Deployment)
+- frontend does not embed write API secrets in browser code
+- write routes remain API-key protected at backend and are throttled
+- full auth on protected routes (`Authorization: Bearer`)
+- refresh tokens are rotated and stored hashed at rest
+- ownership isolation is enforced (no cross-user account access)
+- backend rate limiting includes auth/login and write routes
+- backend port is bound to localhost in compose (`127.0.0.1:${SERVER_PORT}`)
 - PostgreSQL is internal-only (no published host port)
-- max write amount guardrail is enforced on earn/spend/transfer requests (`<= 1,000,000`)
+- max write amount guardrail is enforced (`<= 1,000,000`)
 - keep `.env` and secrets out of git; rotate keys if exposed
 - demo environment only; do not enter real personal data (PII)
 
@@ -157,7 +187,7 @@ For public deployment, start from `.env.public.example` and replace placeholder 
 - request IDs are logged per request
 - `/health` returns application + database status
 
-## Correctness Highlights
+## Correctness Coverage
 - append-only ledger as source of truth
 - idempotency replay/conflict protection
 - pessimistic locking to prevent double-spend

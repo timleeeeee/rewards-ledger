@@ -66,6 +66,19 @@ export interface HealthResponse {
   checks: Record<string, string>;
 }
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  createdAt: string;
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  accessTokenExpiresInSeconds: number;
+  refreshToken: string;
+  user: AuthUser;
+}
+
 export interface FieldValidationError {
   field: string;
   message: string;

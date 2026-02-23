@@ -3,6 +3,7 @@ package com.example.rewards.ledger;
 import com.example.rewards.account.Account;
 import com.example.rewards.account.AccountRepository;
 import com.example.rewards.account.AccountStatus;
+import com.example.rewards.auth.AccountOwnerRepository;
 import com.example.rewards.api.AmountRequest;
 import com.example.rewards.api.ReversalRequest;
 import com.example.rewards.api.TransactionPageResponse;
@@ -34,24 +35,28 @@ public class LedgerService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final AccountRepository accountRepository;
+    private final AccountOwnerRepository accountOwnerRepository;
     private final LedgerTransactionRepository transactionRepository;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final RequestHashUtil requestHashUtil;
 
     public LedgerService(
             AccountRepository accountRepository,
+            AccountOwnerRepository accountOwnerRepository,
             LedgerTransactionRepository transactionRepository,
             IdempotencyRecordRepository idempotencyRecordRepository,
             RequestHashUtil requestHashUtil
     ) {
         this.accountRepository = accountRepository;
+        this.accountOwnerRepository = accountOwnerRepository;
         this.transactionRepository = transactionRepository;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.requestHashUtil = requestHashUtil;
     }
 
     @Transactional
-    public TransactionResponse earn(UUID accountId, AmountRequest request, String idempotencyKey) {
+    public TransactionResponse earn(UUID userId, UUID accountId, AmountRequest request, String idempotencyKey) {
+        assertOwned(userId, accountId);
         String requestHash = requestHashUtil.hash(request);
         OperationResult result = processIdempotent(accountId, "EARN", idempotencyKey, requestHash, () -> {
             Account account = lockActiveAccount(accountId);
@@ -74,7 +79,8 @@ public class LedgerService {
     }
 
     @Transactional
-    public TransactionResponse spend(UUID accountId, AmountRequest request, String idempotencyKey) {
+    public TransactionResponse spend(UUID userId, UUID accountId, AmountRequest request, String idempotencyKey) {
+        assertOwned(userId, accountId);
         String requestHash = requestHashUtil.hash(request);
         OperationResult result = processIdempotent(accountId, "SPEND", idempotencyKey, requestHash, () -> {
             Account account = lockActiveAccount(accountId);
@@ -102,7 +108,8 @@ public class LedgerService {
     }
 
     @Transactional
-    public TransactionResponse reversal(UUID accountId, ReversalRequest request, String idempotencyKey) {
+    public TransactionResponse reversal(UUID userId, UUID accountId, ReversalRequest request, String idempotencyKey) {
+        assertOwned(userId, accountId);
         String requestHash = requestHashUtil.hash(request);
         OperationResult result = processIdempotent(accountId, "REVERSAL", idempotencyKey, requestHash, () -> {
             lockActiveAccount(accountId);
@@ -141,10 +148,12 @@ public class LedgerService {
     }
 
     @Transactional
-    public List<TransactionResponse> transfer(TransferRequest request, String idempotencyKey) {
+    public List<TransactionResponse> transfer(UUID userId, TransferRequest request, String idempotencyKey) {
         if (request.fromAccountId().equals(request.toAccountId())) {
             throw new BadRequestException("fromAccountId and toAccountId must be different");
         }
+        assertOwned(userId, request.fromAccountId());
+        assertOwned(userId, request.toAccountId());
 
         String requestHash = requestHashUtil.hash(request);
         OperationResult result = processIdempotent(request.fromAccountId(), "TRANSFER", idempotencyKey, requestHash, () -> {
@@ -202,10 +211,8 @@ public class LedgerService {
     }
 
     @Transactional(readOnly = true)
-    public TransactionPageResponse getTransactions(UUID accountId, int limit, String cursor) {
-        if (!accountRepository.existsById(accountId)) {
-            throw new NotFoundException("Account not found");
-        }
+    public TransactionPageResponse getTransactions(UUID userId, UUID accountId, int limit, String cursor) {
+        assertOwned(userId, accountId);
 
         int pageSize = Math.min(Math.max(limit, 1), MAX_PAGE_SIZE);
         List<LedgerTransaction> txs;
@@ -231,6 +238,12 @@ public class LedgerService {
         }
 
         return new TransactionPageResponse(items, nextCursor);
+    }
+
+    private void assertOwned(UUID userId, UUID accountId) {
+        if (!accountOwnerRepository.existsByAccountIdAndUserId(accountId, userId)) {
+            throw new NotFoundException("Account not found");
+        }
     }
 
     private OperationResult processIdempotent(
