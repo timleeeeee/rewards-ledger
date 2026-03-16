@@ -1,0 +1,12 @@
+.git
+.gitignore
+.gradle
+build
+out
+.idea
+.vscode
+*.iml
+*.log
+.env
+frontend/node_modules
+frontend/dist
