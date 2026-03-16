@@ -1,8 +1,7 @@
 # Rewards Ledger Demo
 
 Full-stack portfolio demo for a rewards and points ledger.
-
-This repo focuses on correctness and operational basics for interviews and technical review. It is intentionally scoped as a demo system, not a full enterprise rollout.
+Live Demo: `https://rewards-ledger-demo.xyz`
 
 ## Architecture
 - `backend`: Java 21 + Spring Boot 3.5 API (append-only ledger, idempotency, concurrency safety, auth + ownership)
@@ -15,6 +14,11 @@ This repo focuses on correctness and operational basics for interviews and techn
 - React, TypeScript, Vite, Vitest
 - Docker, Docker Compose
 - GitHub Actions (CI + optional VM deploy)
+
+## Prerequisites
+- Docker + Docker Compose
+- Java 21 (optional, for backend tests)
+- Node.js 20+ (optional, for frontend dev mode)
 
 ## Backend API (summary)
 Auth:
@@ -58,7 +62,10 @@ Two tabs are included:
 ## Local Run (full stack)
 1. Create env file:
 ```bash
+# Windows
 copy .env.example .env
+# macOS/Linux
+cp .env.example .env
 ```
 
 2. Start all services:
@@ -92,7 +99,10 @@ Vite dev server runs on `http://localhost:5173` and proxies `/api` to backend `h
 ## Tests
 Backend:
 ```bash
+# Windows
 gradlew.bat test
+# macOS/Linux
+./gradlew test
 ```
 
 Frontend:
@@ -122,7 +132,7 @@ Deploy workflow:
 - write `.env` from GitHub Secrets
 - run idempotent rollout (`docker compose up -d --build --remove-orphans`)
 
-### Required GitHub Secrets for Deploy
+## Required GitHub Secrets for Deploy
 - `VM_SSH_HOST`
 - `VM_SSH_PORT`
 - `VM_SSH_USER`
@@ -160,8 +170,6 @@ Deploy workflow:
 - `FRONTEND_PORT`
 - `FRONTEND_API_BASE_URL`
 
-For public deployment, start from `.env.public.example` and replace placeholder secrets.
-
 ## Security Notes (Demo Deployment)
 - frontend does not embed write API secrets in browser code
 - write routes remain API-key protected at backend and are throttled
@@ -173,14 +181,7 @@ For public deployment, start from `.env.public.example` and replace placeholder 
 - PostgreSQL is internal-only (no published host port)
 - max write amount guardrail is enforced (`<= 1,000,000`)
 - keep `.env` and secrets out of git; rotate keys if exposed
-- demo environment only; do not enter real personal data (PII)
-
-## Public Deployment Checklist
-- configure HTTPS/TLS at the edge (domain + certificate)
-- expose only frontend port (`80`/`443`) in VM firewall/security group
-- keep backend (`8080`) and database (`5432`) blocked from public ingress
-- use demo-only secrets in GitHub Actions and rotate keys regularly
-- detailed runbook: `docs/public-deploy-hardening.md`
+- Public deploy: HTTPS enabled, only 80/443 exposed, backend/db private, secrets managed via GitHub Actions/VM env.
 
 ## Observability
 - `X-Request-Id` is accepted/returned by backend
